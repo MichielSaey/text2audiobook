@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "text2audiobook"
+version = "0.1.0"
+description = "Fire-and-forget CLI: text sources to M4B audiobooks via LLM cleanup and Qwen3-TTS"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "ipywidgets",
+    "pypdf",
+    "fonttools",
+    "ebooklib",
+    "beautifulsoup4",
+    "lxml",
+    "nltk",
+    "httpx",
+    # qwen-tts pins transformers==4.57.3 / accelerate==1.12.0
+    "transformers==4.57.3",
+    "accelerate==1.12.0",
+    "bitsandbytes",
+    "qwen-tts>=0.1.1",
+    "soundfile",
+    "pydub",
+    "mutagen",
+    "torch",
+    # Match torch 2.6+cu124 — unpinned torchaudio pulls 2.11 needing libcudart.so.13.
+    "torchaudio==2.6.0",
+]
+
+[project.scripts]
+text2audiobook = "text2audiobook.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }
+torchaudio = { index = "pytorch-cu124" }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/shared", "src/text2audiobook"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src/shared" = "shared"
+"src/text2audiobook" = "text2audiobook"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

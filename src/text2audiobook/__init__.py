@@ -1,0 +1,5 @@
+"""Text to M4B audiobook pipeline: LLM chapter selection and cleanup, Qwen3-TTS, ffmpeg assembly."""
+
+from text2audiobook.config import AppConfig, load_config
+
+__all__ = ["AppConfig", "load_config"]

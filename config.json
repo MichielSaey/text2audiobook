@@ -1,0 +1,62 @@
+{
+  "paths": {
+    "input_dir": "data/input",
+    "staging_dir": "data/staging",
+    "output_dir": "data/output",
+    "runs_dir": "data/runs"
+  },
+  "chunking": {
+    "format_words_per_chunk": 1000,
+    "speak_target_chars": 800,
+    "speak_max_chars": 1200,
+    "max_chunks_per_chapter": null
+  },
+  "selection": {
+    "keep_chapter_indices": null,
+    "max_chapters": null,
+    "include_intro": true,
+    "include_appendix": false,
+    "opening_words": 250,
+    "opening_batch_size": 4
+  },
+  "llm": {
+    "model_id": "Qwen/Qwen3-4B-Instruct-2507",
+    "device": "cuda",
+    "cleanup": true,
+    "direction": true,
+    "cleanup_batch_size": 1,
+    "max_new_tokens": 2048,
+    "direction_max_new_tokens": 128
+  },
+  "tts": {
+    "model_id": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+    "lang": "English",
+    "voice": "cloned",
+    "device": "auto",
+    "ref_audio": "data/voices/ref_clone.wav",
+    "ref_text": "Homer himself in books five through 12. The poem cuts between far distant and diverse locations, from Olympus to Earth, from Calypso's Island.",
+    "x_vector_only": false,
+    "instruct": "Young adult woman with a warm, gentle mid pitch. Speak with native American or neutral US English pronunciation \u2014 clear native English vowels, consonants, and rhythms. Do not use a Chinese, Mandarin, or any non-English accent. Deliver at a slow, steady, restrained audiobook pace suited to dense nonfiction, remaining calm, precise, and easy to follow.",
+    "batch_max_chars": 0,
+    "batch_max_pad_chars": 3000,
+    "batch_vram_overhead": 0,
+    "batch_max_items": 10,
+    "reload_every_n_units": 50
+  },
+  "output": {
+    "chapter_mp3": false,
+    "mp3_bitrate": "128k",
+    "m4b_bitrate": "128k",
+    "keep_wav": false,
+    "skip_existing": true,
+    "chunk_silence_ms": 150,
+    "chapter_silence_ms": 1000,
+    "loudnorm": true,
+    "speak_footnote_cues": false
+  },
+  "pipeline": {
+    "concurrent_models": false,
+    "ffmpeg_workers": 2,
+    "queue_size": 32
+  }
+}
