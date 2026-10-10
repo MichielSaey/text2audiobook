@@ -1,0 +1,12 @@
+# systemd --user unit. Copy to ~/.config/systemd/user/ and enable the timer.
+# WorkingDirectory is this repo. The space in "(ws) Homelab" is \x20.
+# PATH includes uv and the Trantor venv.
+[Unit]
+Description=Speak the Trantor proposed research briefing
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/michiel/code/(ws)\x20Homelab/text2audiobook
+Environment=PATH=/home/michiel/Documents/trantor/.venv/bin:/etc/profiles/per-user/michiel/bin:/run/current-system/sw/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env uv run text2audiobook --briefing
+TimeoutStartSec=infinity

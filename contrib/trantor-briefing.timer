@@ -1,0 +1,10 @@
+# systemd --user timer. Daily, with Persistent=true so a missed run catches up.
+[Unit]
+Description=Daily Trantor proposed research briefing
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,4 +1,4 @@
-"""Command-line entry point: fire-and-forget folder scan or --url one-shot."""
+"""Command-line entry point: folder scan, one --input file, --url, or --briefing."""
 
 import argparse
 import sys
@@ -14,6 +14,84 @@ def _selected_stages(args: argparse.Namespace) -> list[str] | None:
     """Return requested stage names, or None for the full default pipeline."""
     selected = [name for name in PIPELINE_STAGES if getattr(args, name, False)]
     return selected or None
+
+
+def explicit_sources(
+    input_path: Path | None,
+    url_paths: Sequence[Path] | None = None,
+) -> list[Path] | None:
+    """One ``--input`` file, or ``--url`` files. None scans the input folder."""
+    if input_path is not None:
+        return [input_path]
+    if url_paths:
+        return list(url_paths)
+    return None
+
+
+def _run_briefing(args: argparse.Namespace) -> int:
+    """Export the proposed Trantor briefing and speak that markdown file."""
+    from text2audiobook import briefing
+
+    if not briefing.machine_has_nvidia_gpu():
+        print(briefing.NO_GPU_MESSAGE)
+        return 0
+
+    from text2audiobook.config import load_config
+
+    config = load_config(args.config)
+    config_path = config.config_path
+    tool_root = config_path.parent if config_path is not None else Path.cwd()
+    markdown_path = briefing.briefing_markdown_path(config.paths.input_dir)
+    exported = briefing.export_proposed_briefing(markdown_path, cwd=tool_root)
+    if exported is None:
+        print("error: trantor executable not found on PATH", file=sys.stderr)
+        return 1
+    if exported != 0:
+        print(f"error: trantor briefing exited {exported}", file=sys.stderr)
+        return exported
+    if not markdown_path.is_file():
+        print(
+            f"error: briefing markdown was not written: {markdown_path}",
+            file=sys.stderr,
+        )
+        return 1
+
+    m4b_path = briefing.expected_briefing_m4b(markdown_path, config.paths.output_dir)
+    fingerprint_path = briefing.briefing_fingerprint_file(config.paths.runs_dir)
+    if briefing.should_skip_briefing(
+        markdown_path,
+        fingerprint_path=fingerprint_path,
+        m4b_path=m4b_path,
+        force=args.force,
+    ):
+        print(briefing.UNCHANGED_MESSAGE)
+        return 0
+
+    from text2audiobook.gpu import prepare_gpu_env
+
+    prepare_gpu_env()
+
+    from text2audiobook.logging_setup import setup_logging
+    from text2audiobook.pipeline import run
+
+    setup_logging()
+    stages = _selected_stages(args)
+    code = run(
+        config,
+        source_paths=[markdown_path],
+        stages=stages,
+        force=args.force,
+        voice=args.voice,
+        speak_footnote_cues=args.footnote_cues,
+    )
+    if (
+        code == 0
+        and (stages is None or stages == list(PIPELINE_STAGES))
+        and markdown_path.is_file()
+        and m4b_path.is_file()
+    ):
+        briefing.write_briefing_fingerprint(markdown_path, fingerprint_path)
+    return code
 
 
 def _run_batch_vram_calibration(config_path: Path | None) -> int:
@@ -135,6 +213,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--input",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="Convert this one file. When set, the input folder is not scanned.",
+    )
+    parser.add_argument(
+        "--briefing",
+        action="store_true",
+        help=(
+            "Export the Trantor proposed briefing "
+            "(trantor briefing --status proposed) and convert that markdown file. "
+            "Skips model load when the briefing hash and M4B are unchanged. "
+            "Exits 0 without TTS when this machine has no GPU."
+        ),
+    )
+    parser.add_argument(
         "--extract",
         action="store_true",
         help="Run the extract stage (combinable with other stage flags).",
@@ -212,8 +307,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(format_voice_table())
         return 0
 
+    if args.briefing and (args.input is not None or args.url or args.calibrate_tts_batch):
+        parser.error(
+            "--briefing cannot be combined with --input, --url, or --calibrate-tts-batch"
+        )
+    if args.input is not None and args.url:
+        parser.error("--input and --url cannot be used together")
+
     if args.calibrate_tts_batch:
         return _run_batch_vram_calibration(args.config)
+
+    if args.briefing:
+        return _run_briefing(args)
+
+    if args.input is not None and not args.input.is_file():
+        print(f"error: --input is not a file: {args.input}", file=sys.stderr)
+        return 1
 
     from text2audiobook.gpu import prepare_gpu_env
 
@@ -227,17 +336,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     setup_logging()
     config = load_config(args.config)
 
-    source_paths: list[Path] | None = None
+    url_paths: list[Path] | None = None
     if args.url:
         url_dir = config.paths.staging_dir / "_cli_urls"
-        source_paths = [
+        url_paths = [
             write_url_source(url_dir, url, stem=f"cli_{index}")
             for index, url in enumerate(args.url, start=1)
         ]
 
     return run(
         config,
-        source_paths=source_paths,
+        source_paths=explicit_sources(args.input, url_paths),
         stages=_selected_stages(args),
         force=args.force,
         voice=args.voice,
