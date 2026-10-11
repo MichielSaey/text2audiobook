@@ -29,6 +29,12 @@ Or fetch a page directly:
 uv run text2audiobook --url https://retrochronic.com
 ```
 
+Or convert one file and leave the input folder unscanned:
+
+```bash
+uv run text2audiobook --input notes.md
+```
+
 `text2audiobook` loads `config.json` in the tool directory by default. Paths in the config are relative to that folder. For each book slug, if `config.books/<slug>.json` exists it is deep-merged on top of the base (book wins; `paths` stay on the base).
 
 ### Stages
@@ -75,6 +81,8 @@ For a fixed catalog speaker instead, set `tts.model_id` to `Qwen/Qwen3-TTS-12Hz-
 | HTML (`.html`, `.htm`) | Drop under `data/input/` |
 | URL (`.url`) | File with one `http(s)` URL on line 1; optional title on line 2 |
 | CLI `--url` | One-shot fetch; skips the input-folder scan |
+| CLI `--input` | One file; the input folder is not scanned |
+| CLI `--briefing` | Trantor proposed briefing (`data/input/trantor-proposed.md`) |
 
 HTML/URL pages are chapterized on `h1`/`h2` (nav/header/footer stripped). Large anthologies still go through LLM chapter selection; set `selection.max_chapters` for a smoke run.
 
@@ -83,6 +91,45 @@ Example `.url` file:
 ```
 https://retrochronic.com
 ```
+
+## Trantor briefing
+
+From the repo root, export the proposed briefing and speak it:
+
+```bash
+uv run text2audiobook --briefing
+```
+
+When `trantor` is on `PATH`, that runs:
+
+```bash
+trantor briefing --status proposed --out data/input/trantor-proposed.md
+```
+
+Only that markdown file goes through extract, clean, format, and speak. The finished M4B lands in `data/output/`. A homelab file server can publish that directory later.
+
+`data/runs/briefing-fingerprint.txt` stores a sha256 of the markdown. When that hash still matches and the M4B is already present, the command exits before models load, so a second run the same day stays cheap. `--force` rebuilds anyway.
+
+When `/dev/nvidia0` is missing and `nvidia-smi` fails, the command prints `Briefing skipped because this machine has no GPU.` and exits 0. TTS does not start.
+
+### Daily timer
+
+`contrib/trantor-briefing.service` runs `uv run text2audiobook --briefing` with `WorkingDirectory` set to this repo (`/home/michiel/code/(ws) Homelab/text2audiobook`). `contrib/trantor-briefing.timer` is daily with `Persistent=true`, so a missed day runs at the next boot. Copy the units and enable the timer yourself:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp contrib/trantor-briefing.service contrib/trantor-briefing.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now trantor-briefing.timer
+```
+
+A login shell uses the same command from the repo root:
+
+```bash
+uv run text2audiobook --briefing
+```
+
+The fingerprint skip keeps that second same-day run from loading models. A login shell needs `trantor` on `PATH`. The service adds `/home/michiel/Documents/trantor/.venv/bin` and the Nix `uv`.
 
 ## Data layout
 
@@ -97,6 +144,7 @@ Stems live under `data/staging/<book_slug>/`:
 | `data/staging/_url_cache/` | Fetched HTML cache (keyed by URL hash) |
 | `data/output/<book_slug>.m4b` | Finished audiobooks |
 | `data/runs/` | Run manifests, logs, `ledger.jsonl` |
+| `data/runs/briefing-fingerprint.txt` | Hash of the last spoken Trantor briefing |
 
 `data/**` is gitignored; only `.gitkeep` files are tracked. Ignore leftover v1 `wav/cleaned.jsonl` if it is still on disk.
 

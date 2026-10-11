@@ -92,13 +92,18 @@ def extract_chapters(content: str, *, preamble_title: str) -> list[Chapter]:
     return assign_chapter_slugs(sections)
 
 
+def book_title(path: Path, content: str) -> str:
+    """H1 title, or a title derived from the filename."""
+    return _first_h1_title(content) or _title_from_filename(path)
+
+
 def metadata_from_markdown(
     path: Path,
     content: str,
     staging_root: Path,
     output_root: Path,
 ) -> BookMetadata:
-    title = _first_h1_title(content) or _title_from_filename(path)
+    title = book_title(path, content)
     return finalize_metadata(
         title=title,
         author="Unknown Author",
