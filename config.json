@@ -49,7 +49,7 @@
     "m4b_bitrate": "128k",
     "keep_wav": false,
     "skip_existing": true,
-    "chunk_silence_ms": 150,
+    "chunk_silence_ms": 300,
     "chapter_silence_ms": 1000,
     "loudnorm": true,
     "speak_footnote_cues": false
