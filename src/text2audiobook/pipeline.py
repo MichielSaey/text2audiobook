@@ -1,4 +1,4 @@
-"""v2 orchestration: extract → clean → format → speak stems, sequential GPU, optional stage flags."""
+"""v2 orchestration: extract → translate → clean → format → speak stems, sequential GPU, optional stage flags."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from text2audiobook.catalog import select_chapters
 from text2audiobook.cleanup import CLEANER_VERSION, CleanSection, clean_chapters
 from text2audiobook.chunking import (
     TextChunk,
+    build_chunks,
     build_chunks_from_sections,
     build_speak_units_from_chunks,
 )
@@ -64,13 +65,24 @@ from text2audiobook.stems import (
     load_format_scripts,
     load_format_units,
     load_jsonl,
+    load_translate_chapters,
     manifest_matches,
     read_json,
     save_clean_sections,
     save_extract_chapters,
     save_format_script,
+    save_translate_chapters,
+    save_translate_windows,
     stable_hash,
     write_json,
+)
+from text2audiobook.translate import (
+    TRANSLATE_PROMPT,
+    TRANSLATOR_VERSION,
+    chapters_from_windows,
+    is_already_english,
+    translation_target,
+    translate_windows,
 )
 from text2audiobook.tracking import BookRecord, RunTracker
 from text2audiobook.tts import (
@@ -103,6 +115,7 @@ class StageState:
     """Mutable stem outputs threaded through injectable stage handlers."""
 
     chapters: list[Chapter] | None = None
+    translated: list[Chapter] | None = None
     sections: list[CleanSection] | None = None
     format_units: list[TextChunk] | None = None
     scripts: list[Chapter] | None = None
@@ -116,11 +129,13 @@ def run(
     force: bool = False,
     voice: str | None = None,
     speak_footnote_cues: bool | None = None,
+    package_path: Path | None = None,
 ) -> int:
     """Process supported sources. Returns a process exit code.
 
     When ``source_paths`` is provided (e.g. from ``--url``), those paths are
-    used and the input directory is not scanned.
+    used and the input directory is not scanned. When ``package_path`` is set,
+    that package is the only input and the input directory is not scanned.
     """
     selected = canonical_stages(stages)
     tracker = RunTracker(config.paths.runs_dir, config.to_dict())
@@ -134,25 +149,61 @@ def run(
             "before TTS loads."
         )
 
-    try:
-        sources = (
-            list(source_paths)
-            if source_paths is not None
-            else find_sources(config.paths.input_dir)
+    package_parsed: tuple[BookMetadata, list[Chapter]] | None = None
+    if package_path is not None:
+        if source_paths is not None:
+            logger.error("A package cannot be combined with other sources")
+            tracker.finalize("failed")
+            return 1
+        from text2audiobook.formats.package import read_package, resolve_package_path
+
+        try:
+            package_file = resolve_package_path(Path(package_path))
+            package_parsed = read_package(
+                package_file,
+                staging_root=config.paths.staging_dir,
+                output_root=config.paths.output_dir,
+            )
+        except (OSError, ValueError) as exc:
+            logger.error("%s", exc)
+            tracker.finalize("failed")
+            return 1
+        package_metadata, package_chapters = package_parsed
+        config = replace(
+            config,
+            selection=replace(
+                config.selection,
+                keep_chapter_indices=[chapter.index for chapter in package_chapters],
+                max_chapters=None,
+            ),
         )
-    except FileNotFoundError as exc:
-        logger.error("%s", exc)
-        tracker.finalize("failed")
-        return 1
-    if not sources:
-        logger.error("No sources to process")
-        tracker.finalize("failed")
-        return 1
-    logger.info(
-        "Found %d source(s)%s",
-        len(sources),
-        "" if source_paths is not None else f" under {config.paths.input_dir}",
-    )
+        sources = [package_file]
+        logger.info(
+            "Package %s — %s (%d spoken units)",
+            package_file,
+            package_metadata.title,
+            len(package_chapters),
+        )
+    else:
+        try:
+            sources = (
+                list(source_paths)
+                if source_paths is not None
+                else find_sources(config.paths.input_dir)
+            )
+        except FileNotFoundError as exc:
+            logger.error("%s", exc)
+            tracker.finalize("failed")
+            return 1
+        if not sources:
+            logger.error("No sources to process")
+            tracker.finalize("failed")
+            return 1
+        logger.info(
+            "Found %d source(s)%s",
+            len(sources),
+            "" if source_paths is not None else f" under {config.paths.input_dir}",
+        )
 
     need_llm = _run_needs_llm(config, selected)
     tts_device = resolve_tts_device(config.tts.device)
@@ -188,6 +239,8 @@ def run(
                     force=force,
                     voice=voice,
                     speak_footnote_cues=speak_footnote_cues,
+                    parsed=package_parsed,
+                    preserve_all_chapters=package_parsed is not None,
                 )
             except KeyboardInterrupt:
                 tracker.finish_book(record, status="failed", error="KeyboardInterrupt")
@@ -230,24 +283,38 @@ def process_source(
     force: bool = False,
     voice: str | None = None,
     speak_footnote_cues: bool | None = None,
+    parsed: tuple[BookMetadata, list[Chapter]] | None = None,
+    preserve_all_chapters: bool = False,
 ) -> None:
-    """Convert one source through the requested extract / format / speak stages."""
+    """Convert one source through the requested extract / translate / clean / format / speak stages."""
     selected = canonical_stages(stages)
     if tts_device is None:
         tts_device = resolve_tts_device(config.tts.device)
 
     with tracker.stage(record, "parse"):
-        metadata, all_chapters = parse_source(
-            source_path,
-            staging_root=config.paths.staging_dir,
-            output_root=config.paths.output_dir,
-            force_fetch=force and "extract" in selected,
-        )
+        if parsed is not None:
+            metadata, all_chapters = parsed
+        else:
+            metadata, all_chapters = parse_source(
+                source_path,
+                staging_root=config.paths.staging_dir,
+                output_root=config.paths.output_dir,
+                force_fetch=force and "extract" in selected,
+            )
     record.title = metadata.title
     record.author = metadata.author
     tracker.write()
 
     config = resolve_book_config(config, metadata.slug)
+    if preserve_all_chapters:
+        config = replace(
+            config,
+            selection=replace(
+                config.selection,
+                keep_chapter_indices=[chapter.index for chapter in all_chapters],
+                max_chapters=None,
+            ),
+        )
     if speak_footnote_cues is not None:
         config = with_speak_footnote_cues(config, speak_footnote_cues)
 
@@ -330,7 +397,7 @@ def process_source(
             ensure_llm=ensure_llm,
         )
 
-    def run_clean() -> None:
+    def run_translate() -> None:
         chapters = state.chapters
         if chapters is None:
             chapters = _run_extract(
@@ -348,6 +415,37 @@ def process_source(
                 ensure_llm=ensure_llm,
             )
             state.chapters = chapters
+        state.translated = _run_translate(
+            chapters,
+            metadata=metadata,
+            source_kind=source_kind,
+            config=config,
+            stems=stems,
+            tracker=tracker,
+            record=record,
+            progress=progress,
+            selected=selected,
+            force=force,
+            ensure_llm=ensure_llm,
+        )
+
+    def run_clean() -> None:
+        chapters = state.translated
+        if chapters is None:
+            chapters = _run_translate(
+                state.chapters or [],
+                metadata=metadata,
+                source_kind=source_kind,
+                config=config,
+                stems=stems,
+                tracker=tracker,
+                record=record,
+                progress=progress,
+                selected=selected,
+                force=force,
+                ensure_llm=ensure_llm,
+            )
+            state.translated = chapters
         state.sections = _run_clean(
             chapters,
             metadata=metadata,
@@ -363,11 +461,13 @@ def process_source(
     def run_format() -> None:
         sections = state.sections
         if sections is None:
-            extract_hash = (
-                file_sha256(stems.chapters_json) if stems.chapters_json.exists() else ""
+            translate_hash = (
+                file_sha256(stems.translate_chapters_json)
+                if stems.translate_chapters_json.exists()
+                else ""
             )
             fingerprint = _clean_fingerprint(
-                config, extract_hash=extract_hash, source_kind=source_kind
+                config, translate_hash=translate_hash, source_kind=source_kind
             )
             clean_ok = (
                 manifest_matches(stems.clean_manifest, fingerprint)
@@ -462,6 +562,7 @@ def process_source(
 
     handlers = {
         "extract": run_extract,
+        "translate": run_translate,
         "clean": run_clean,
         "format": run_format,
         "speak": run_speak,
@@ -481,6 +582,8 @@ def process_source(
 
 def _run_needs_llm(config: AppConfig, stages: tuple[str, ...]) -> bool:
     if "extract" in stages and config.selection.keep_chapter_indices is None:
+        return True
+    if "translate" in stages:
         return True
     return "format" in stages and (config.llm.cleanup or config.llm.direction)
 
@@ -593,10 +696,29 @@ def _extract_fingerprint(
     }
 
 
-def _clean_fingerprint(config: AppConfig, *, extract_hash: str, source_kind: str) -> dict[str, Any]:
+def _translate_fingerprint(
+    config: AppConfig, *, extract_hash: str, source_kind: str
+) -> dict[str, Any]:
     return {
         "version": 2,
         "extract_hash": extract_hash,
+        "translator_version": TRANSLATOR_VERSION,
+        "source_kind": source_kind,
+        "target_language": translation_target(config.tts.lang),
+        "llm_model_id": config.llm.model_id,
+        "max_new_tokens": config.llm.max_new_tokens,
+        "cleanup_batch_size": config.llm.cleanup_batch_size,
+        "translate_prompt_hash": text_hash(TRANSLATE_PROMPT),
+        "format_words_per_chunk": config.chunking.format_words_per_chunk,
+    }
+
+
+def _clean_fingerprint(
+    config: AppConfig, *, translate_hash: str, source_kind: str
+) -> dict[str, Any]:
+    return {
+        "version": 2,
+        "translate_hash": translate_hash,
         "cleaner_version": CLEANER_VERSION,
         "source_kind": source_kind,
         "speak_footnote_cues": config.output.speak_footnote_cues,
@@ -793,6 +915,98 @@ def _run_extract(
     return chapters
 
 
+def _run_translate(
+    chapters: list[Chapter],
+    *,
+    metadata: BookMetadata,
+    source_kind: str,
+    config: AppConfig,
+    stems: BookStems,
+    tracker: RunTracker,
+    record: BookRecord,
+    progress: ProgressContext,
+    selected: tuple[str, ...],
+    force: bool,
+    ensure_llm,
+) -> list[Chapter]:
+    extract_hash = (
+        file_sha256(stems.chapters_json) if stems.chapters_json.exists() else ""
+    )
+    fingerprint = _translate_fingerprint(
+        config, extract_hash=extract_hash, source_kind=source_kind
+    )
+    files_ok = (
+        stems.translate_chapters_json.exists() and stems.translate_windows_jsonl.exists()
+    )
+    translate_ok = manifest_matches(stems.translate_manifest, fingerprint) and files_ok
+
+    if "translate" not in selected:
+        if not translate_ok:
+            raise FileNotFoundError(
+                f"Translate stem missing for {metadata.title!r}. "
+                "Run --translate first."
+            )
+        return load_translate_chapters(stems)
+
+    if translate_ok and not force:
+        logger.info("Translate stem current — skipping translation")
+        translated = load_translate_chapters(stems)
+        record.chapter_count = len(translated)
+        record.word_count = sum(len(chapter.text.split()) for chapter in translated)
+        tracker.write()
+        return translated
+
+    if force and stems.translate_dir.exists():
+        shutil.rmtree(stems.translate_dir)
+
+    if not chapters:
+        raise ValueError(f"No chapters to translate for {metadata.title!r}")
+
+    # Same word windows as format, but never drop a tail with max_chunks_per_chapter.
+    chunks = build_chunks(
+        chapters,
+        config.chunking.format_words_per_chunk,
+        max_chunks_per_chapter=None,
+        source_kind=source_kind,
+    )
+    needs_model = any(not is_already_english(chunk.text) for chunk in chunks)
+    active_llm = ensure_llm() if needs_model else None
+    with tracker.stage(record, "translate"):
+        windows = translate_windows(
+            active_llm,
+            chunks,
+            config.llm,
+            progress=progress,
+        )
+    translated = chapters_from_windows(chapters, windows)
+    if not translated:
+        raise ValueError(f"No chapters left after translate for {metadata.title!r}")
+
+    save_translate_windows(stems, windows)
+    save_translate_chapters(stems, translated)
+    copied = sum(1 for window in windows if window.copied)
+    write_json(
+        stems.translate_manifest,
+        {
+            **fingerprint,
+            "chapters_hash": file_sha256(stems.translate_chapters_json),
+            "window_count": len(windows),
+            "copied_count": copied,
+            "chapter_count": len(translated),
+        },
+    )
+    record.chapter_count = len(translated)
+    record.word_count = sum(len(chapter.text.split()) for chapter in translated)
+    tracker.write()
+    logger.info(
+        "Wrote translate stem (%d chapter(s), %d window(s), %d copied as English)",
+        len(translated),
+        len(windows),
+        copied,
+    )
+    return translated
+
+
 def _run_clean(
     chapters: list[Chapter],
     *,
@@ -805,9 +1019,13 @@ def _run_clean(
     selected: tuple[str, ...],
     force: bool,
 ) -> list[CleanSection]:
-    extract_hash = file_sha256(stems.chapters_json)
+    translate_hash = (
+        file_sha256(stems.translate_chapters_json)
+        if stems.translate_chapters_json.exists()
+        else ""
+    )
     fingerprint = _clean_fingerprint(
-        config, extract_hash=extract_hash, source_kind=source_kind
+        config, translate_hash=translate_hash, source_kind=source_kind
     )
     clean_ok = (
         manifest_matches(stems.clean_manifest, fingerprint)

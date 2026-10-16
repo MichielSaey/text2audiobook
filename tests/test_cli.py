@@ -7,7 +7,7 @@ from text2audiobook.cli import _selected_stages, explicit_sources, main
 
 
 def _ns(**flags: bool) -> argparse.Namespace:
-    base = {name: False for name in ("extract", "clean", "format", "speak")}
+    base = {name: False for name in ("extract", "translate", "clean", "format", "speak")}
     base.update(flags)
     return argparse.Namespace(**base)
 
@@ -19,8 +19,12 @@ def test_selected_stages_defaults_to_full_pipeline() -> None:
 def test_selected_stages_combinable_and_ordered() -> None:
     assert _selected_stages(_ns(speak=True, format=True)) == ["format", "speak"]
     assert _selected_stages(_ns(clean=True)) == ["clean"]
-    assert _selected_stages(_ns(extract=True, speak=True, clean=True, format=True)) == [
+    assert _selected_stages(_ns(translate=True, extract=True)) == ["extract", "translate"]
+    assert _selected_stages(
+        _ns(extract=True, translate=True, speak=True, clean=True, format=True)
+    ) == [
         "extract",
+        "translate",
         "clean",
         "format",
         "speak",

@@ -59,7 +59,7 @@ def _stems_after_extract_format(source: Path, config, monkeypatch) -> BookStems:
         config,
         tracker=tracker,
         record=record,
-        stages=("extract", "clean", "format"),
+        stages=("extract", "translate", "clean", "format"),
         tts_device="cpu",
     )
     staging = next(p for p in config.paths.staging_dir.iterdir() if p.is_dir())
@@ -69,6 +69,11 @@ def _stems_after_extract_format(source: Path, config, monkeypatch) -> BookStems:
 def test_canonical_stages_orders_and_rejects() -> None:
     assert canonical_stages(["speak", "extract"]) == ("extract", "speak")
     assert canonical_stages(["format", "clean"]) == ("clean", "format")
+    assert canonical_stages(["clean", "translate", "speak"]) == (
+        "translate",
+        "clean",
+        "speak",
+    )
     try:
         canonical_stages(["nope"])
     except ValueError as exc:
@@ -130,6 +135,18 @@ def test_extract_format_speak_stems(tmp_path: Path, monkeypatch) -> None:
     extract_manifest = json.loads(stems.extract_manifest.read_text(encoding="utf-8"))
     assert extract_manifest.get("parsed_hash")
     assert not stems.format_manifest.exists()
+
+    record = tracker.start_book(source)
+    process_source(
+        source,
+        config,
+        tracker=tracker,
+        record=record,
+        stages=("translate",),
+        tts_device="cpu",
+    )
+    assert stems.translate_manifest.exists()
+    assert stems.translate_chapters_json.exists()
 
     record = tracker.start_book(source)
     process_source(
@@ -480,7 +497,7 @@ def test_format_invalidates_when_extract_chapters_change(tmp_path: Path, monkeyp
         config,
         tracker=tracker,
         record=record,
-        stages=("clean", "format"),
+        stages=("translate", "clean", "format"),
         force=True,
         tts_device="cpu",
     )
@@ -574,7 +591,7 @@ def test_force_format_with_new_script_invalidates_speak_wavs(
         config,
         tracker=tracker,
         record=record,
-        stages=("extract", "clean", "format", "speak"),
+        stages=("extract", "translate", "clean", "format", "speak"),
         tts_device="cpu",
     )
     assert synth_calls == ["first pass script"]
@@ -639,7 +656,7 @@ def test_edited_format_unit_resynthesizes(tmp_path: Path, monkeypatch) -> None:
         config,
         tracker=tracker,
         record=record,
-        stages=("extract", "clean", "format", "speak"),
+        stages=("extract", "translate", "clean", "format", "speak"),
         tts_device="cpu",
     )
     assert synth_calls
@@ -740,7 +757,7 @@ def test_direction_pass_writes_instruct_and_speak_uses_it(
         config,
         tracker=tracker,
         record=record,
-        stages=("extract", "clean", "format", "speak"),
+        stages=("extract", "translate", "clean", "format", "speak"),
         tts_device="cpu",
     )
     stems = BookStems(next(p for p in config.paths.staging_dir.iterdir() if p.is_dir()))
@@ -808,7 +825,7 @@ def test_direction_disabled_speak_falls_back_to_global_instruct(
         config,
         tracker=tracker,
         record=record,
-        stages=("extract", "clean", "format", "speak"),
+        stages=("extract", "translate", "clean", "format", "speak"),
         tts_device="cpu",
     )
     stems = BookStems(next(p for p in config.paths.staging_dir.iterdir() if p.is_dir()))

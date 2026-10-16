@@ -192,8 +192,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="text2audiobook",
         description=(
-            "Convert supported text sources (EPUB, PDF, Markdown, HTML, .url) "
-            "to M4B audiobooks."
+            "Convert supported text sources (EPUB, PDF, Markdown, HTML, .url, "
+            "or a Trantor package) to M4B audiobooks."
         ),
     )
     parser.add_argument(
@@ -230,14 +230,33 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--package",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help=(
+            "Read a Trantor package directory or package.json. "
+            "When set, the input folder is not scanned."
+        ),
+    )
+    parser.add_argument(
         "--extract",
         action="store_true",
         help="Run the extract stage (combinable with other stage flags).",
     )
     parser.add_argument(
+        "--translate",
+        action="store_true",
+        help=(
+            "Run the translate stage (combinable; requires extract stem if extract "
+            "is skipped). English text is copied through; other languages are "
+            "translated into English."
+        ),
+    )
+    parser.add_argument(
         "--clean",
         action="store_true",
-        help="Run the clean stage (combinable; requires extract stem if extract is skipped).",
+        help="Run the clean stage (combinable; requires translate stem if translate is skipped).",
     )
     parser.add_argument(
         "--format",
@@ -323,6 +342,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.input is not None and not args.input.is_file():
         print(f"error: --input is not a file: {args.input}", file=sys.stderr)
         return 1
+    if args.package is not None and args.url:
+        print("error: --package cannot be combined with --url", file=sys.stderr)
+        return 2
 
     from text2audiobook.gpu import prepare_gpu_env
 
@@ -351,6 +373,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         force=args.force,
         voice=args.voice,
         speak_footnote_cues=args.footnote_cues,
+        package_path=args.package,
     )
 
 

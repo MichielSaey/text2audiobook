@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-STAGES = ("parse", "classify", "clean", "format", "tts", "encode", "m4b")
+STAGES = ("parse", "classify", "translate", "clean", "format", "tts", "encode", "m4b")
 
 
 def _now_iso() -> str:

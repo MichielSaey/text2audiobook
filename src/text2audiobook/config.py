@@ -117,6 +117,8 @@ class LlmConfig:
 @dataclass
 class TtsConfig:
     model_id: str = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
+    # Spoken language. Also the translation target: English is the written
+    # language, so a separate target_language key is not added.
     lang: str = "English"
     voice: str = "Serena"
     device: str = "auto"

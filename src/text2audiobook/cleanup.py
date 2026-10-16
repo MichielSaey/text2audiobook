@@ -1,6 +1,6 @@
 """Deterministic clean stage: split body/footnotes, then scrub citations and print junk.
 
-Runs after extract and before LLM format. Artifacts live under ``clean/`` so the
+Runs after translate and before LLM format. Artifacts live under ``clean/`` so the
 split and scrub can be inspected before any model rewrite.
 """
 

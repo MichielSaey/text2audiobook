@@ -1,4 +1,4 @@
-"""v2 staging stems: extract / format / speak manifests and skip fingerprints."""
+"""v2 staging stems: extract / translate / clean / format / speak manifests and skip fingerprints."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from text2audiobook.io import Chapter
 logger = logging.getLogger(__name__)
 
 STEM_VERSION = 2
-PIPELINE_STAGES = ("extract", "clean", "format", "speak")
+PIPELINE_STAGES = ("extract", "translate", "clean", "format", "speak")
 
 
 @dataclass(frozen=True)
@@ -24,6 +24,10 @@ class BookStems:
     @property
     def extract_dir(self) -> Path:
         return self.root / "extract"
+
+    @property
+    def translate_dir(self) -> Path:
+        return self.root / "translate"
 
     @property
     def clean_dir(self) -> Path:
@@ -42,6 +46,10 @@ class BookStems:
         return self.extract_dir / "manifest.json"
 
     @property
+    def translate_manifest(self) -> Path:
+        return self.translate_dir / "manifest.json"
+
+    @property
     def clean_manifest(self) -> Path:
         return self.clean_dir / "manifest.json"
 
@@ -56,6 +64,14 @@ class BookStems:
     @property
     def chapters_json(self) -> Path:
         return self.extract_dir / "chapters.json"
+
+    @property
+    def translate_chapters_json(self) -> Path:
+        return self.translate_dir / "chapters.json"
+
+    @property
+    def translate_windows_jsonl(self) -> Path:
+        return self.translate_dir / "windows.jsonl"
 
     @property
     def clean_sections_jsonl(self) -> Path:
@@ -158,6 +174,31 @@ def load_extract_chapters(stems: BookStems) -> list[Chapter]:
 
 def save_extract_chapters(stems: BookStems, chapters: list[Chapter]) -> None:
     write_json(stems.chapters_json, chapters_to_payload(chapters))
+
+
+def load_translate_chapters(stems: BookStems) -> list[Chapter]:
+    payload = read_json(stems.translate_chapters_json)
+    if not isinstance(payload, list):
+        raise FileNotFoundError(
+            f"Translate stem missing chapters at {stems.translate_chapters_json}"
+        )
+    return chapters_from_payload(payload)
+
+
+def save_translate_chapters(stems: BookStems, chapters: list[Chapter]) -> None:
+    write_json(stems.translate_chapters_json, chapters_to_payload(chapters))
+
+
+def save_translate_windows(stems: BookStems, windows: list[Any]) -> None:
+    """Write translate/windows.jsonl (one LLM window per line)."""
+    stems.translate_dir.mkdir(parents=True, exist_ok=True)
+    path = stems.translate_windows_jsonl
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as handle:
+        for window in windows:
+            payload = window.to_json() if hasattr(window, "to_json") else window
+            handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    tmp.replace(path)
 
 
 def save_clean_sections(stems: BookStems, sections: list[Any]) -> None:
