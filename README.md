@@ -70,7 +70,7 @@ text2audiobook --voice random
 
 For a fixed catalog speaker instead, set `tts.model_id` to `Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice` and `voice` to e.g. `Serena` (faster; no instruct on 0.6B). Serena/Vivian are Chinese-native; Mandarin accent can slip on English. English-native CustomVoice speakers are male only (`Ryan`, `Aiden`). For a designed native-English female persona without a reference clip, set `tts.model_id` to `Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign` and `voice` to `designed` (slower). `--voice random` picks from the nine CustomVoice speakers without replacement until the pool wraps.
 
-`tts.lang` is the book/content language (default `English`). When the active model supports instruct, global `tts.instruct` is composed with optional per-chunk direction (base + direction). CustomVoice has no `speed` knob. Base cloning uses `tts.x_vector_only` (default `false`; ICL mode needs `ref_text`).
+`tts.lang` is the book/content language (default `English`). When the active model supports instruct, global `tts.instruct` is composed with optional per-chunk direction (base + direction). CustomVoice has no `speed` knob. Base cloning uses `tts.x_vector_only` (default `true` — speaker embedding only; set `false` for ICL with `ref_text`, which can prepend stray onset syllables like "and").
 
 ## Supported inputs
 

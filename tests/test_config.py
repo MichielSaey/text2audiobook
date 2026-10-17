@@ -177,7 +177,7 @@ def test_load_config_defaults_direction_and_customvoice(tmp_path: Path) -> None:
     assert cfg.tts.lang == "English"
     assert cfg.tts.ref_audio is None
     assert cfg.tts.ref_text is None
-    assert cfg.tts.x_vector_only is False
+    assert cfg.tts.x_vector_only is True
     assert cfg.tts.instruct is not None
     assert "warm" in cfg.tts.instruct.lower()
     assert "native" in cfg.tts.instruct.lower()
